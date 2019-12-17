@@ -8,14 +8,15 @@ pip install lark-parser
 import os, sys, traceback
 from lark import Lark, Transformer, v_args
 
-
 grammar = r"""
-    ?start: NEWLINE* statements
+    ?start: statements
 
-    !statements: ( ( ( statement | statements_inline ) smnt_new_line ) | ( COMMENT_EOL NEWLINE* ) | ( goto_anchor_stmt NEWLINE*  ) )*
+    !statements: ( ( ( statement | statements_inline ) smnt_new_line ) | comment_stmt | goto_anchor_stmt | empty_new_line )*
     !statements_inline: statement ( ":" statement )+
 
-    smnt_new_line: COMMENT_EOL NEWLINE* | NEWLINE+
+    smnt_new_line: comment_stmt | NEWLINE
+    empty_new_line : NEWLINE
+    comment_stmt : COMMENT_EOL
 
     ?statement: ( option_stmt
         | preprocessor_if_stmt
@@ -23,6 +24,7 @@ grammar = r"""
         | function_definition_stmt
         | on_error_stmt
         | goto_stmt
+        | exit_stmt
         | dim_stmt
         | sub_call_stmt
         | assign_stmt
@@ -36,48 +38,96 @@ grammar = r"""
 
     !option_stmt: "Option"i ( "Explicit"i | "Base"i NUMBER )
 
-    ?on_error_stmt: "On"i "Error"i ( "GoTo"i  (NAME|"0") | "Resume"i next )
-    !goto_stmt: "GoTo"i  VB_NAME
-    !goto_anchor_stmt: VB_NAME GOTO_ANCHOR_EOL
+    !on_error_stmt: "On"i "Error"i ( "GoTo"i  (NAME|"0") | "Resume"i next )
+    !goto_stmt: "GoTo"i  any_name
+    !goto_anchor_stmt: any_name GOTO_ANCHOR_EOL
 
-    !dim_stmt: ( "Static" | private | "ReDim"i | "Dim"i | ( dim_stmt "," ) ) VB_NAME [ "(" ranges ")" ] [ as [ "New"i ] type_name ]
+    !exit_stmt: "Exit"i  ( for | "Sub"i | "Function"i )
+
+    !dim_stmt: ( "Static" | private | "ReDim"i | "Dim"i | ( dim_stmt "," ) ) TYPED_NAME [ "(" ranges ")" ] [ as [ "New"i ] type_expr ]
     ?ranges: range | ranges "," range
     ?range: expr | ( expr to expr )
 
-    function_declare_stmt: ("Public"i|"Private"i)? "Declare"i "PtrSafe"i? ( "Sub"i | "Function"i ) NAME "Lib"i VB_STRING "(" function_args ")"  [ as NAME ]
+    function_declare_stmt: ("Public"i|"Private"i)? "Declare"i "PtrSafe"i? ( "Sub"i | "Function"i ) NAME "Lib"i VB_STRING "(" function_args ")"  [ as type_expr ]
 
-    ?function_definition_stmt.2: ("Public"i|"Private"i)? ( "Sub"i | "Function"i ) NAME "(" function_args ")" [ as NAME ] smnt_new_line  statements end ( "Sub" | "Function" )
-    ?function_args: function_args "," function_arg | function_arg |
-    function_arg: [ "Optional" ] ["ByRef"|"ByVal"] NAME [ as NAME ] [ "=" expr ]
+    ?function_definition_stmt.2: ("Public"i|"Private"i)? function_or_sub NAME "(" function_args ")" type_info? smnt_new_line  statements end ( "Sub" | "Function" )
+    !function_or_sub: "Sub"i | "Function"i
+    function_args: [ function_arg ("," function_arg)* ]
+    function_arg: [ "Optional" ] ["ByRef"|"ByVal"] NAME type_info? default_value?
+    !type_info: as type_expr
+    !default_value: "=" expr
 
-    // ("Const"i|"Public"i|"Private"i)?
-    !assign_stmt: [ set ] lvalue "="  expr
-    ?lvalue: "."? ( name | func_call )
+    // ("Public"i|"Private"i)?
+    !assign_stmt: [ "Const"i | set | "Let"i ] lvalue "="  expr
+
+    ?lvalue: with_access | any_name | member_access | func_call
+    ?with_access: WITH_PREFIX any_name
+    ?member_access: lvalue "." any_name
     // !! func_call is lvalue because we can have my2darray(1, 2) = "abc"
 
-    ?expr: name | VB_STRING | NUMBER | func_call | expr_binary | expr_other
-    ?expr_binary: expr ( "=" | "<>" | ">" | "<" | ">=" | "<=" | "Is"i | "+" | "-" | "*" | "/" | "&" | "." | "And"i | "AndAlso"i | "Or"i | "OrElse"i | "Xor"i ) expr
-    ?expr_other: ( "-" expr ) | ( "." expr ) | ( "Not" expr ) | ( "(" expr ")" ) | ( "New"i expr )
+    // expr = value-expression / l-expression
+    // value-expression = literal-expression / parenthesized-expression / typeof-is-expression /
+    // new-expression / operator-expression
+    // l-expression = simple-name-expression / instance-expression / member-access-expression /
+    // index-expression / dictionary-access-expression / with-expression
 
-    !type_name: NAME
-    ?name: (NAME|VB_NAME)  ( "." (NAME|VB_NAME) )*
+    ?expr: lvalue | expr_literal | expr_parentheses | expr_new | expr_operator
+    ?expr_literal: VB_STRING | NUMBER
+    ?expr_operator: expr_binary | expr_unary
+    !expr_binary: expr ( "^" | "=" | "<>" | ">" | "<" | ">=" | "<=" | "Is"i | "+" | "-" | "*" | "/" | "\\" | "&" | "." | "Mod"i | "And"i | "AndAlso"i | "Or"i | "OrElse"i | "Xor"i | "Like"i | "Is"i ) expr
+    !expr_unary: ( "-" expr ) | ( "Not" expr )
+    ?expr_parentheses: "(" expr_operator ")"
+    ?expr_new: "New"i type_expr
 
-    !sub_call_stmt: "."? name func_args
-        | call name ( "(" func_args ")" ) ?
+    // expr_parentheses only apply on expr_operator to avoid consumung argument list
 
-    !func_call: name "(" func_args ")"
-    !func_args: func_args "," func_arg | func_args "," | "," func_args | func_arg |
-    !func_arg: [ VB_NAME ":=" ] expr
+    // member-access-expression = l-expression NO-WS "." unrestricted-name
+    // member-access-expression =/ l-expression line-continuation "." unrestricted-name
 
-    ?if_stmt: if expr then statement [ else statement ]
-        | if expr then smnt_new_line statements ( elseif expr then smnt_new_line statements )* [ else smnt_new_line statements ] end if
+    // with-expression = with-member-access-expression / with-dictionary-access-expression
+    // with-member-access-expression = "." unrestricted-name
+    // with-dictionary-access-expression = "!" unrestricted-name
+    // DICT ACCESS EXPRESION ??
+
+    // Exponentiation ^
+    // Unary negation -
+    // Multiplicative *, /
+    // Integer division \
+    // Modulus Mod
+    // Additive +, -
+    // Concatenation &
+    // Relational =, <>, <, >, <=, >=, Like, Is ??
+    // Logical NOT Not
+    // Logical AND And
+    // Logical OR Or
+    // Logical XOR Xor
+    // Logical EQV Eqv ??
+    // Logical IMP Imp ??
+
+
+    !type_expr: NAME | ( NAME "." NAME )
+    ?name: any_name  ( "." any_name )*
+    any_name : NAME | TYPED_NAME | FOREIGN_NAME
+
+    !sub_call_stmt: lvalue func_args
+        | call lvalue
+
+    !func_call: lvalue "(" func_args ")"
+    !func_args: func_arg? ( "," func_arg? )*
+    func_arg: [ TYPED_NAME ":=" ] expr
+
+    ?if_stmt: if_stmt_inline | if_stmt_multilines
+    if_stmt_inline : if expr then statement [ else statement ]
+    if_stmt_multilines : if expr then smnt_new_line statements ( elseif expr then smnt_new_line statements )* [ else smnt_new_line statements ] end if
 
     !preprocessor_if_stmt: "#If" expr then smnt_new_line statements ( "#" elseif expr then smnt_new_line statements )* [ "#Else" smnt_new_line statements ] "#End If"
 
-    ?for_stmt: for each VB_NAME in expr smnt_new_line statements next [VB_NAME]
-        | for VB_NAME "=" expr to expr [ step expr ] smnt_new_line statements next [VB_NAME]
+    ?for_stmt: for_each_stmt | for_in_stmt
+    !for_each_stmt: for each TYPED_NAME in expr smnt_new_line statements next [TYPED_NAME]
+    !for_in_stmt:     for TYPED_NAME "=" expr to expr  for_in_step? smnt_new_line statements next [TYPED_NAME]
+    !for_in_step:      step expr
 
-    ?loop_stmt: "While"i expr smnt_new_line statements "Wend"i
+    !loop_stmt: "While"i expr smnt_new_line statements "Wend"i
         | "Do"i  "While"i expr smnt_new_line statements "Loop"i
         | "Do"i  "Until"i expr smnt_new_line statements "Loop"i
         | "Do"i  smnt_new_line statements "Loop"i "While"i expr
@@ -129,7 +179,6 @@ grammar = r"""
 
     GOTO_ANCHOR_EOL: /:\r*\n/
 
-
     CONTINUE_LINE: /_\r*\n/
     %ignore CONTINUE_LINE
 
@@ -146,13 +195,19 @@ grammar = r"""
     %import common.DIGIT
     NAME: LETTER ("_"|LETTER|DIGIT)*
 
+
     %import common.NUMBER
     %import common.NEWLINE
     %import common.WS_INLINE
+
+    WITH_PREFIX: WS_INLINE "."
+
     %ignore WS_INLINE
 
     // $ String, % Integer, & Long, # Double, ! Single, @ Currency
-    VB_NAME: NAME /[$%&#!@]?/
+    TYPED_NAME: NAME /[$%&#!@]?/
+
+    FOREIGN_NAME : "[" NAME "]"
 
 """
 
@@ -174,14 +229,19 @@ def transpile_all(src_root):
             print(">!", str(e).split('\n')[0])
         print()
 
-def transpile_one(src_path, verbose=False):
+def transpile_one(src_path, verbose=False, generate=True):
     import vba_py_generator as vba2py
 
     ast = parse_one(src_path, verbose)
+    if verbose:
+        #print(ast.pretty())
+        pass
 
-    #src = vba2py.generate(ast)
-    #with open(src_path+".py", "w") as f:
-    #    f.write(src)
+    if generate:
+        src = vba2py.generate(ast, verbose=verbose)
+        #with open(src_path+".py", "w") as f:
+        #    f.write(src)
+        return src
 
 def parse_one(src_path, verbose=False):
     with open(src_path, "r") as f:
@@ -206,7 +266,6 @@ if __name__ == '__main__':
     src_root =r"..\..\xjs\vba"
     transpile_all(src_root)
 
-    transpile_one(r"vba_demo_input.bas")
-    #transpile_one(src_root + r"\modWalkDir.bas")
-    #transpile_one(src_root + r"\modHttpRequest.bas")
-    transpile_one(src_root + r"\modXtendedXl.bas")
+    test_input = r"vba_demo_input.bas"
+    test_input = src_root + r"\modXtendedXl.bas"
+    transpile_one(test_input, verbose=False, generate=True)

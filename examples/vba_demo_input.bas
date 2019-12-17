@@ -1,13 +1,23 @@
 ' Extended Excel context menu
 ' Author : Claude Cochet
 ' Created : 2010-10-06
-' !! Error if you add space after comment
+
 Const a = 3
 
 Option Explicit
 Option Base 5.3
 
 ' Demo VBA file for Python transpiler
+
+' VBA function with types in the signature becomes a Python function with type annotations (PEP 483, 484)
+Function strlen(s As String) As Long
+	strlen = Len(s)
+End Function
+
+' VBA with Optional, ByRef/ByVal
+Function f2(Optional ByRef s0 As String, Optional ByVal s1 = "v1", Optional s2 As String = "") As Long
+	f2 = 5*7
+End Function
 
 Sub fct()
 	' Static Variable
@@ -26,7 +36,7 @@ anchor:
 	Dim ctlg
 	Set ctlg = New ADOX.Catalog
 	Dim ctlg2 : Set ctlg2 = New ADOX.Catalog
-	'!! Dim cnx As New ADODB.Connection
+	Dim cnx As New ADODB.Connection
 
 	a = 3
     b = 3
@@ -37,26 +47,49 @@ anchor:
 	' a comment after an inline comment
 	Application.OnKey "^!", "ToggleTwoDigits"       ' extend standard shortcut
 
-	'!! Error if no parentheses below
-	'!! Call tmp.Sort
-	Call fct()
-	Call fct( 123, 456 )
-	Call fct( a := 123, b := 456 )
-	Call fct( 123, New Dictionary )
-	Call fct( 123, 456, )
-	Call fct( 123,, 789 )
-	Call fct( , 456, 789 )
-	Call fct( 123, New Dictionary )
-	names_dict.Add nm_sheet, New Dictionary
+	If a() Then b() Else c = -1   ' trouble with b() !!
 
-	Err.Raise vbObjectError, , "Oops"
+	If funcs = True Then
 
-	'!! Error below
-	'sht.cells(1, 1).Activate
+		' no parentheses below if no arguments
+		Call tmp.Sort
+		Call fct()
+		Call fct( 123, 456 )
+		Call fct( a := 123, b := 456 )
+		Call fct( 123, New Dictionary )
+		Call fct( 123, 456, )
+		Call fct( 123,, 789 )
+		Call fct( , 456, 789 )
+		Call fct( 123, New Dictionary )
+		names_dict.Add nm_sheet, New Dictionary
+
+		Err.Raise vbObjectError, , "Oops"
+
+	ElseIf subs = True Then
+		sht.cells(1, 1).Activate
+		sht.cells(1).Activate
+		sht.cells(1, 1).Activate 123
+		sht.cells(1).Activate 123
+		sht.cells(1, 1).Activate abc
+		sht.cells(1, 1).Activate abc, def
+		sht.cells(1, 1).Activate abc, def.xyz
+		sht.cells(1, 1).Activate abc, def.xyz  ' comment
+	End If
+
+	tmpChart.ChartArea.Width = shp.Width
+	rs.fields(data(nl&)(j&)).Value = data(i&)(j&)
+	Application.Union(rng, topLeftCell.CurrentArray).Select
+	'names_dict.Item(nm_sheet).Add
+	'names_dict.Item(nm_sheet).Add 123
+	'names_dict.Item(nm_sheet).Add nm_bare
+	'names_dict.Item(nm_sheet).Add nm_bare, nm
+	'names_dict.Item(nm_sheet).Add nm_bare, nm.RefersTo
 	'names_dict.Item(nm_sheet).Add nm_bare, nm.RefersTo ' nm.RefersTo or nm.RefersToR1C1
 
-	Dim FileNumber: FileNumber = FreeFile
-    Open export_path For Output Access Write As #FileNumber
-    Print #FileNumber, json
-    Close #FileNumber
+	For i = 1 To NbFiles() Step 7 Mod 3
+		Dim FileNumber: FileNumber = FreeFile
+		Open export_path For Output Access Write As #FileNumber
+		Print #FileNumber, json
+		Close #FileNumber
+	Next i
 End Sub
