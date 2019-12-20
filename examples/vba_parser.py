@@ -74,7 +74,7 @@ grammar = r"""
     ?expr: lvalue | expr_literal | expr_parentheses | expr_new | expr_operator
     ?expr_literal: VB_STRING | NUMBER
     ?expr_operator: expr_binary | expr_unary
-    !expr_binary: expr ( "^" | "=" | "<>" | ">" | "<" | ">=" | "<=" | "Is"i | "+" | "-" | "*" | "/" | "\\" | "&" | "." | "Mod"i | "And"i | "AndAlso"i | "Or"i | "OrElse"i | "Xor"i | "Like"i | "Is"i ) expr
+    !expr_binary: expr ( "^" | "=" | "<>" | ">" | "<" | ">=" | "<=" | "Is"i | "+" | "-" | "*" | "/" | "\\" | "&" | "." | "Mod"i | "And"i | "AndAlso"i | "Or"i | "OrElse"i | "Xor"i | "Like"i ) expr
     !expr_unary: ( "-" expr ) | ( "Not" expr )
     ?expr_parentheses: "(" expr_operator ")"
     ?expr_new: "New"i type_expr
@@ -127,13 +127,17 @@ grammar = r"""
     !for_in_stmt:     for TYPED_NAME "=" expr to expr  for_in_step? smnt_new_line statements next [TYPED_NAME]
     !for_in_step:      step expr
 
-    !loop_stmt: "While"i expr smnt_new_line statements "Wend"i
-        | "Do"i  "While"i expr smnt_new_line statements "Loop"i
-        | "Do"i  "Until"i expr smnt_new_line statements "Loop"i
-        | "Do"i  smnt_new_line statements "Loop"i "While"i expr
+    ?loop_stmt: while_wend_stmt | while_do_loop_stmts | do_loop_while_stmts | until_do_loop_stmts | do_loop_until_stmts
+    !while_wend_stmt : while_condition smnt_new_line statements "Wend"i
+    !while_do_loop_stmts : "Do"i while_condition smnt_new_line statements "Loop"i
+    !do_loop_while_stmts : "Do"i smnt_new_line statements "Loop"i while_condition
+    !until_do_loop_stmts : "Do"i until_condition smnt_new_line statements "Loop"i
+    !do_loop_until_stmts : "Do"i smnt_new_line statements "Loop"i until_condition
+    !while_condition : "While"i expr
+    !until_condition : "Until"i expr
 
-    ?with_stmt: with expr smnt_new_line statements end with
-    !with_prefix: "."?
+    !with_stmt: with expr smnt_new_line statements end with
+    !with_prefix: "."
 
     open_stmt: "Open"i expr [open_mode_clause] [open_access_clause] [open_lock_clause] "As"i file_number [open_len_clause]
     open_mode_clause : for (  "Append" | "Binary" | "Input" | "Output" | "Random" )
@@ -239,8 +243,10 @@ def transpile_one(src_path, verbose=False, generate=True):
 
     if generate:
         src = vba2py.generate(ast, verbose=verbose)
-        #with open(src_path+".py", "w") as f:
-        #    f.write(src)
+        with open(src_path+".py", "w") as f:
+            f.write(src)
+            print("Code written.")
+            pass
         return src
 
 def parse_one(src_path, verbose=False):

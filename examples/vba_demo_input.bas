@@ -10,8 +10,14 @@ Option Base 5.3
 ' Demo VBA file for Python transpiler
 
 ' VBA function with types in the signature becomes a Python function with type annotations (PEP 483, 484)
-Function strlen(s As String) As Long
-	strlen = Len(s)
+Function tryDivide(a as Double, b as Double) as Double
+	On Error GoTo nodivide
+	a = a / b
+	tryDivide = b / a
+
+	Exit Function
+nodivide:
+	tryDivide = a * b
 End Function
 
 ' VBA with Optional, ByRef/ByVal
@@ -92,4 +98,31 @@ anchor:
 		Print #FileNumber, json
 		Close #FileNumber
 	Next i
+End Sub
+
+Sub loops()
+    Debug.Print "While . . Wend"
+    While False
+        Debug.Print "zero+"
+    Wend
+
+    Debug.Print "Do While . . Loop"
+    Do While False
+        Debug.Print "zero+"
+    Loop
+
+    Debug.Print "Do . Loop While . "
+    Do
+        Debug.Print "one+"
+    Loop While False
+
+    Debug.Print "Do Until  . . Loop"
+    Do Until True
+        Debug.Print "zero+"
+    Loop
+
+    Debug.Print "Do . Loop Until . "
+    Do
+        Debug.Print "one+"
+    Loop Until True
 End Sub
