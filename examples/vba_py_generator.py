@@ -5,10 +5,25 @@ TAB = "    "
 
 TYPE_MAP = {
 	"String": "str",
+	"Boolean": "bool",
+	"Byte": "int",
+	"Integer": "int",
 	"Long": "int",
-	"Float": "float",
+	"LongLong": "int",
+	"Single": "float",
 	"Double": "float",
+	# Currency, Date, Variant
 	}
+
+TYPE_SUFFIX_MAP = {
+	"$": "str",
+	"%": "int", 	# Integer
+	"&": "int", 	# Long
+	"#": "float", 	# Double
+	"!": "float", 	# Single
+	# "@":  "float", # Currency
+	}
+
 OP_MAP = {
 	"=": "==",
 	"<>": "!=",
@@ -17,15 +32,21 @@ OP_MAP = {
 	"Or": "or", 	# approximate equivalence. Python does lazy evaluation
 	"OrElse": "or",
 	"&": "+",
-	"Mod": "%" }
+	"Mod": "%",
+	"Is": "is",
+	}
 
 class GenerateInfos:
 	def __init__(self):
 		self.indent = ""
+		self.option_explicit = False
+		self.option_base = 0
 		self.def_func_name = None # to handle return value
 		self.on_error_resume_next = False
 		self.on_error_goto = None
 		self.with_stack = []
+		self.global_vars = []
+		self.vars = self.global_vars
 
 class CustomException(Exception):
     pass
@@ -39,7 +60,7 @@ def generate(ast, verbose=False):
 	infos = GenerateInfos()
 
 	src = []
-	src.append("import os, sys\n")
+	src.append("import os, sys, numpy as np\n")
 
 	if verbose:
 		print(ast.pretty())
@@ -48,6 +69,19 @@ def generate(ast, verbose=False):
 
 	print(f"Code generated. \t #lines{len(src)}")
 	return '\n'.join(src)
+
+has_unsupported_feature = False
+def unsupported_feature(msg, src, infos):
+	global has_unsupported_feature
+	has_unsupported_feature = True
+
+	print(">!", msg)
+	msg = f"{infos.indent}raise Exception(\"{msg}\")";
+	if src is not None:
+		src.append(msg)
+	else:
+		return src
+	#assert False
 
 def generate_stmts(ast, src, infos):
 	assert get_type(ast) == "statements"
@@ -86,9 +120,9 @@ def generate_stmt_throws(ast, src, infos):
 		for i in range(0, n, 2):
 			generate_stmt(ast.children[i], src, infos)
 	elif t == "option_stmt":
-		pass
+		generate_option_stmt(ast, src, infos)
 	elif t == "dim_stmt":
-		pass
+		generate_dim_stmt(ast, src, infos)
 	elif t == "comment_stmt":
 		txt = generate_fragment(ast, infos)
 		src.append(f"{infos.indent}{txt}")
@@ -138,15 +172,80 @@ def generate_stmt_throws(ast, src, infos):
 		src.append("")
 	elif t in [ "preprocessor_if_stmt", "goto_stmt", "exit_stmt", "if_stmt_inline", "for_each_stmt" ]:
 		# "with_stmt",
-		msg = f"{infos.indent}raise Exception('Statement type {t} not supported !!')"
-		print(msg)
-		src.append(msg)
+		unsupported_feature(f"Unsupported statement type {t}.", src, infos)
 	elif t in [ "open_stmt", "print_stmt", "close_stmt" ]:
-		msg = f"{infos.indent}raise Exception('File operations (open, print, close) not supported !!')"
-		print(msg)
-		src.append(msg)
+		unsupported_feature(f"Unsupported file operations (open, print, close).", src, infos)
 	else:
 		raise Exception(f"Unknown statement type {t}")
+
+def generate_option_stmt(ast, src, infos):
+	opt = get_text(ast.children[1])
+	if opt == "Explicit":
+		infos.option_explicit = True
+	elif opt == "Base":
+		infos.option_base = get_int(ast.children[2])
+	else:
+		unsupported_feature(f"Unsupported Option {opt}.", src, infos)
+
+def generate_dim_stmt(ast, src, infos):
+	decls = find_nodes_by_type(ast, "dim_decl")
+	tmp = []
+	for decl in decls:
+		var = decl.children[0]
+		typ = None
+		has_new = False
+		range_indices = None
+
+		# implicit type
+		if get_type(var) == "TYPED_NAME" and var.value[-1] in TYPE_SUFFIX_MAP:
+			typ = TYPE_SUFFIX_MAP[var.value[-1]]
+			var = generate_fragment(var, infos)
+		# explicit type
+		xtyp = find_node_by_type(decl, "type_info")
+		if xtyp:
+			vb_type = generate_fragment(xtyp.children[-1], infos)
+			has_new = find_node_by_type(xtyp, "NEW") is not None
+			if vb_type in TYPE_MAP:
+				typ = TYPE_MAP[vb_type]
+			if has_new:
+				typ = vb_type 	# best we can do !!
+
+		xrng = find_node_by_type(decl, "ranges")
+		xrngs = find_nodes_by_type(decl, "range")
+		if xrng is not None or len(xrngs)>0:
+			range_indices = []
+		for rng in xrngs:
+			if len(rng.children) == 1:
+				range_indices.append([ infos.option_base, generate_ith_fragment(rng, 0, infos) ])
+			elif len(rng.children) == 3:
+				range_indices.append([ generate_ith_fragment(rng, 0, infos), generate_ith_fragment(rng, 2, infos) ])
+			else:
+				raise False
+
+		if range_indices is not None:
+			shape = ", ".join([ f"{rng[1]}-{rng[0]}+1" for rng in range_indices])
+			offset = ", ".join([ f"{rng[0]}" for rng in range_indices])
+			if typ == "str" or typ == "int" or typ == "float":
+				tmp.append(f"{var} = np.array(shape=({shape}), offset=({offset}), dtype={typ})")
+			else:
+				tmp.append(f"{var} = np.array(shape=({shape}), offset=({offset}))")
+		elif typ == "ArrayList":
+				tmp.append(f"{var} = []")
+		else:
+			if typ == "str":
+				tmp.append(f"{var} = \"\"")
+			elif typ == "int":
+				tmp.append(f"{var} = 0")
+			elif typ == "float":
+				tmp.append(f"{var} = 0.0")
+			elif has_new:
+				tmp.append(f"{var} = {typ}()")
+			elif typ is None:
+				tmp.append(f"{var} = None")
+
+		infos.vars.append(var)
+
+	src.append(f"{infos.indent}{'; '.join(tmp)}")
 
 def generate_function_definition_stmt(ast, src, infos):
 	assert get_type(ast.children[0]) == "function_or_sub"
@@ -167,6 +266,7 @@ def generate_function_definition_stmt(ast, src, infos):
 	try:
 		infos.def_func_name = name
 		infos.indent +=TAB
+		infos.vars = [] + infos.global_vars 	# clone global scope as local one
 		generate_stmts(stmts, src, infos)
 
 		if get_text(ast.children[0]) == "Function":
@@ -174,6 +274,7 @@ def generate_function_definition_stmt(ast, src, infos):
 	finally:
 		infos.def_func_name = None
 		infos.indent = infos.indent[:-len(TAB)]
+		infos.vars = infos.global_vars 	# restore global scope
 
 	src.append(f"") # !!
 
@@ -189,8 +290,7 @@ def generate_exit_stmt(ast, src, infos):
 		# check which for loopwe are exiting from !!
 		src.append(f"{infos.indent}break")
 	else:
-		print(f"Exit {t} not supported")
-		assert False
+		unsupported_feature("Unsupported Exit {t}", src, infos)
 
 def generate_sub_call_stmt(ast, src, infos):
 	if get_type(ast.children[0]) == "call":
@@ -224,11 +324,20 @@ def generate_func_call(ast, infos):
 	assert get_type(ast.children[3]) == "RPAR"
 
 	name = generate_fragment(ast.children[0], infos)
-	args_csv = generate_func_args(ast.children[2], infos)
+	array_indices =  name in infos.vars or is_builtin_array(name)	# functions can't be assigned to variables, so that must be an array
+	args_csv = generate_func_args(ast.children[2], infos, array_indices=array_indices)
+
+	if array_indices:
+		return f"{name}{args_csv}"
 
 	return f"{name}({args_csv})"
 
-def generate_func_args(ast, infos):
+def is_builtin_array(lhs):
+	if lhs.endswith(")") or lhs.endswith("]"):
+		return True
+	return False
+
+def generate_func_args(ast, infos, array_indices = False):
 	assert get_type(ast) == "func_args" or get_type(ast) == "func_args_sub"
 
 	if len(ast.children)==0:
@@ -249,6 +358,8 @@ def generate_func_args(ast, infos):
 		# ending with comma
 		args.append("None")
 
+	if array_indices:
+		return "".join([ f"[{a}]" for a in args ])
 	return ", ".join(args)
 
 def generate_assign_stmt(ast, src, infos):
@@ -266,6 +377,8 @@ def generate_assign_stmt(ast, src, infos):
 		# !! if we assign to the name of the function then we can't have recursive code
 		# !! if we rename, we have to rename every assignment and evaluation
 		pass
+	else:
+		infos.vars.append(var)
 
 	src.append(f"{infos.indent}{var} = {val}")
 
@@ -442,18 +555,19 @@ def generate_fragment(ast, infos):
 		return ast.value
 	elif t == "VB_STRING":
 		txt = ast.value[1:-1]
-		txt= txt.replace('""', '"') # more elaborate version needed !!
+		txt= txt.replace('""', '"')
+		txt= txt.replace('\\', '\\\\').replace('"', '\\"')
 		return f'"{txt}"'
 	elif t == "NAME":
 		return ast.value
 	elif t == "TYPED_NAME":
 		var = ast.value
-		if var[-1] in "$%&#!@":
+		if var[-1] in TYPE_SUFFIX_MAP:
 			var = var[:-1] 	# ignoring the type suffix
 		return var
 	elif t == "any_name":
 		assert n==1
-		return str(ast.children[0])
+		return generate_fragment(ast.children[0], infos)
 	elif t == "with_access":
 		return generate_with_access(ast, infos)
 	elif t == "comment_stmt":
@@ -498,7 +612,10 @@ def generate_fragment(ast, infos):
 
 		if op in OP_MAP:
 			op = OP_MAP[op]
-		return  f"{lhs} {op} {rhs}"
+		if op in [ "Like", "Eqv", "Imp" ]:
+			unsupported_feature(f"Unsupported {op} operator.", None, infos)
+		else:
+			return  f"{lhs} {op} {rhs}"
 	elif t == "expr_unary":
 		assert n==2
 		op = get_text(ast.children[0])
@@ -532,6 +649,9 @@ def get_text(ast):
 	else:
 		return ast.value
 
+def get_int(ast):
+	return int(get_text(ast))
+
 def is_node(ast):
 	return isinstance(ast, lark.tree.Tree)
 
@@ -546,16 +666,16 @@ def find_node_by_type(ast, data_type):
 			found = child
 	return found
 
-	# tmp = ast.find_data(data_type)    # recursive !
-	# tmp = list(tmp)
-	# if len(tmp)!=1:
-	# 	print("#find_node_by_type", len(tmp))
-	# return tmp[0]
+def find_nodes_by_type(ast, data_type):
+	# recursive !!
+	tmp = ast.find_data(data_type)
+	tmp = list(tmp)
+	return tmp
 
 if __name__ == '__main__':
 	import vba_parser as p
 	test_file = r"vba_demo_input.bas"
 	#test_file = r"..\..\xjs\vba\modJsonStringify.bas"
-	test_file = r"..\..\xjs\vba\modHttpRequest.bas"
 	src = p.transpile_one(test_file, verbose=False, generate=True)
+	print()
 	print(src)

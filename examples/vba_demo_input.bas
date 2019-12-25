@@ -5,9 +5,27 @@
 Const a = 3
 
 Option Explicit
-Option Base 5.3
+Option Base 5
 
 ' Demo VBA file for Python transpiler
+
+Sub test_array()
+    Dim a(2)
+    a(0) = 11
+    a(1) = 13
+    a(2) = 17
+
+    Dim b(0 To 2, 1 To 3)
+    b(1, 2) = 5
+
+	c = Array("a", "b", "c")
+End Sub
+
+Sub test_string()
+    Dim a As String
+    a = " It's ""Well Done"". "
+    a = " d \ e"
+End Sub
 
 ' VBA function with types in the signature becomes a Python function with type annotations (PEP 483, 484)
 Function tryDivide(a as Double, b as Double) as Double
@@ -32,7 +50,7 @@ Sub fct()
 	Goto anchor
 anchor:
 	Dim i%, j%, nl%, nh%, ml%, mh%
-	Dim i&, j&, nl&, nh&, ml&, mh& ' flt#
+	Dim i&, j&, nl&, nh&, ml&, mh2&, flt2#
 	ReDim header$(ml% To mh%)
 
 	Dim a
@@ -77,11 +95,12 @@ anchor:
 		sht.cells(1, 1).Activate 123
 		sht.cells(1).Activate 123
 		sht.cells(1, 1).Activate abc
-		sht.cells(1, 1).Activate abc, def
-		sht.cells(1, 1).Activate abc, def.xyz
-		sht.cells(1, 1).Activate abc, def.xyz  ' comment
+		sht.cells(1, 1).Activate abc, dfg
+		sht.cells(1, 1).Activate abc, dfg.xyz
+		sht.cells(1, 1).Activate abc, dfg.xyz  ' comment
 	End If
 
+	Dim data
 	tmpChart.ChartArea.Width = shp.Width
 	rs.fields(data(nl&)(j&)).Value = data(i&)(j&)
 	Application.Union(rng, topLeftCell.CurrentArray).Select

@@ -44,9 +44,10 @@ grammar = r"""
 
     !exit_stmt: "Exit"i  ( for | "Sub"i | "Function"i )
 
-    !dim_stmt: ( "Static" | private | "ReDim"i | "Dim"i | ( dim_stmt "," ) ) TYPED_NAME [ "(" ranges ")" ] [ as [ "New"i ] type_expr ]
+    !dim_stmt: ( "Static" | private | "ReDim"i | "Dim"i  ) dim_decl ( "," dim_decl ) *
+    !dim_decl: TYPED_NAME [ "(" ranges ")" ] [ type_info ]
     ?ranges: range | ranges "," range
-    ?range: expr | ( expr to expr )
+    !range: expr | ( expr to expr )
 
     function_declare_stmt: ("Public"i|"Private"i)? "Declare"i "PtrSafe"i? ( "Sub"i | "Function"i ) NAME "Lib"i VB_STRING "(" function_args ")"  [ as type_expr ]
 
@@ -54,7 +55,7 @@ grammar = r"""
     !function_or_sub: "Sub"i | "Function"i
     function_args: [ function_arg ("," function_arg)* ]
     function_arg: [ "Optional" ] ["ByRef"|"ByVal"] NAME type_info? default_value?
-    !type_info: as type_expr
+    !type_info: as [ "New"i ]  type_expr
     !default_value: "=" expr
 
     // ("Public"i|"Private"i)?
