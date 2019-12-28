@@ -60,7 +60,11 @@ def generate(ast, verbose=False):
 	infos = GenerateInfos()
 
 	src = []
-	src.append("import os, sys, numpy as np\n")
+	src.append("import os, sys, numpy as np")
+	src.append("")
+	src.append("""#sys.path.append(r"..\..\lark\examples")""")
+	src.append("from vba_py_app import *")
+	src.append("")
 
 	if verbose:
 		print(ast.pretty())
@@ -183,7 +187,9 @@ def generate_option_stmt(ast, src, infos):
 	if opt == "Explicit":
 		infos.option_explicit = True
 	elif opt == "Base":
-		infos.option_base = get_int(ast.children[2])
+		base = get_int(ast.children[2])
+		assert base==0 or base==1 	# as per VBA spec
+		infos.option_base = base
 	else:
 		unsupported_feature(f"Unsupported Option {opt}.", src, infos)
 
@@ -226,9 +232,9 @@ def generate_dim_stmt(ast, src, infos):
 			shape = ", ".join([ f"{rng[1]}-{rng[0]}+1" for rng in range_indices])
 			offset = ", ".join([ f"{rng[0]}" for rng in range_indices])
 			if typ == "str" or typ == "int" or typ == "float":
-				tmp.append(f"{var} = np.array(shape=({shape}), offset=({offset}), dtype={typ})")
+				tmp.append(f"{var} = np.ndarray(shape=({shape},), offset_isnt_what_we_need=({offset},), dtype={typ})")
 			else:
-				tmp.append(f"{var} = np.array(shape=({shape}), offset=({offset}))")
+				tmp.append(f"{var} = np.ndarray(shape=({shape},), offset_isnt_what_we_need=({offset},))")
 		elif typ == "ArrayList":
 				tmp.append(f"{var} = []")
 		else:
